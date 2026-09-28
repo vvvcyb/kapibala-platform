@@ -7,7 +7,7 @@ async function main() {
   // 1. Preset users: admin and viewer
   await prisma.user.upsert({
     where: { username: 'admin' },
-    update: {},
+    update: { password: 'admin123', role: 'admin' },
     create: {
       username: 'admin',
       password: 'admin123',
@@ -17,7 +17,7 @@ async function main() {
 
   await prisma.user.upsert({
     where: { username: 'viewer' },
-    update: {},
+    update: { password: 'viewer123', role: 'viewer' },
     create: {
       username: 'viewer',
       password: 'viewer123',

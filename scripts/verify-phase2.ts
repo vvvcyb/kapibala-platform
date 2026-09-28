@@ -1,6 +1,7 @@
 /**
  * Automated Verification Script for Phase 2: Core Server & State Machine (A0 ~ A3)
  */
+import { prisma } from '../packages/server/src/prisma.js';
 
 const SERVER_URL = 'http://localhost:3000';
 const GATEWAY_URL = 'http://localhost:4001';
@@ -26,7 +27,7 @@ async function testA0AuthAndHealth() {
   const adminLoginRes = await fetch(`${SERVER_URL}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'admin', password: 'admin' }),
+    body: JSON.stringify({ username: 'admin', password: 'admin123' }),
   });
   assert(adminLoginRes.status === 200, `Admin login status: ${adminLoginRes.status}`);
   const adminAuth = await adminLoginRes.json() as { accessToken: string };
@@ -37,7 +38,7 @@ async function testA0AuthAndHealth() {
   const viewerLoginRes = await fetch(`${SERVER_URL}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'viewer', password: 'viewer' }),
+    body: JSON.stringify({ username: 'viewer', password: 'viewer123' }),
   });
   assert(viewerLoginRes.status === 200, `Viewer login status: ${viewerLoginRes.status}`);
   const viewerAuth = await viewerLoginRes.json() as { accessToken: string };
@@ -268,6 +269,20 @@ async function testA3GroupsAndA2Messaging(adminToken: string) {
 
 async function main() {
   try {
+    // Reset test data in DB for clean idempotent verification
+    await prisma.message.deleteMany();
+    await prisma.groupMember.deleteMany();
+    await prisma.group.deleteMany();
+    await prisma.job.deleteMany();
+    await prisma.account.updateMany({
+      data: {
+        status: 'idle',
+        version: 0,
+        platformUserId: null,
+        rateLimitedUntil: null,
+      },
+    });
+
     const { adminToken } = await testA0AuthAndHealth();
     await testA1Accounts(adminToken);
     await testA3GroupsAndA2Messaging(adminToken);
@@ -278,6 +293,8 @@ async function main() {
   } catch (err) {
     console.error('\n❌ Phase 2 Verification Failed:', err);
     process.exit(1);
+  } finally {
+    await prisma.$disconnect();
   }
 }
 
