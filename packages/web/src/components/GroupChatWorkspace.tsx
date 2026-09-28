@@ -7,6 +7,7 @@ import {
   Plus,
   Shield,
   ShieldCheck,
+  ShieldAlert,
   User,
   Check,
   CheckCheck,
@@ -19,6 +20,7 @@ import {
 } from 'lucide-react';
 import {
   Group,
+  GroupMember,
   Account,
   MessageItem,
   AgentRun,
@@ -39,6 +41,27 @@ interface GroupChatWorkspaceProps {
   refreshTrigger?: number;
 }
 
+interface SystemNotice {
+  id: string;
+  type: 'kick';
+  targetUserId: string;
+  sentAt: string;
+}
+
+type TimelineItem =
+  | { kind: 'message'; data: MessageItem; sentAt: string }
+  | { kind: 'kick_notice'; data: SystemNotice; sentAt: string };
+
+interface SenderDisplay {
+  name: string;
+  badgeLabel: string;
+  badgeColor: string;
+  dotColor: string;
+  platformUserId: string;
+  isOwnAccount: boolean;
+  isSpammer: boolean;
+}
+
 export const GroupChatWorkspace: React.FC<GroupChatWorkspaceProps> = ({
   groups,
   accounts,
@@ -51,6 +74,8 @@ export const GroupChatWorkspace: React.FC<GroupChatWorkspaceProps> = ({
   const isViewer = currentUser?.role === 'viewer';
 
   const [messages, setMessages] = useState<MessageItem[]>([]);
+  const [systemNotices, setSystemNotices] = useState<SystemNotice[]>([]);
+  const [dynamicMembers, setDynamicMembers] = useState<GroupMember[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [inputText, setInputText] = useState('');
@@ -84,6 +109,16 @@ export const GroupChatWorkspace: React.FC<GroupChatWorkspaceProps> = ({
     }
   }, [groups, selectedGroupId, onSelectGroup]);
 
+  // Synchronize dynamic members when currentGroup changes
+  useEffect(() => {
+    if (currentGroup) {
+      setDynamicMembers([...currentGroup.members]);
+    } else {
+      setDynamicMembers([]);
+    }
+    setSystemNotices([]);
+  }, [currentGroup?.id]);
+
   // Update default sender account when current group changes
   useEffect(() => {
     if (onlineMemberAccounts.length > 0) {
@@ -96,6 +131,60 @@ export const GroupChatWorkspace: React.FC<GroupChatWorkspaceProps> = ({
       }
     }
   }, [currentGroup, accounts]);
+
+  const scrollToBottom = () => {
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+  };
+
+  const addKickNotice = (targetUserId: string) => {
+    if (!targetUserId) return;
+    const noticeId = `kick_${targetUserId}_${Date.now()}`;
+    setSystemNotices((prev) => {
+      const recent = prev.some(
+        (n) => n.targetUserId === targetUserId && Math.abs(Date.now() - new Date(n.sentAt).getTime()) < 10000
+      );
+      if (recent) return prev;
+      return [
+        ...prev,
+        {
+          id: noticeId,
+          type: 'kick',
+          targetUserId,
+          sentAt: new Date().toISOString(),
+        },
+      ];
+    });
+    scrollToBottom();
+  };
+
+  const extractKicksFromRuns = (runs: AgentRun[]): SystemNotice[] => {
+    const kicks: SystemNotice[] = [];
+    for (const run of runs) {
+      if (run.steps) {
+        for (const step of run.steps) {
+          if (step.name === 'kick_user' && (step.auditVerdict === 'pass' || !step.isError)) {
+            const target = String(
+              step.input?.platform_user_id ||
+              step.input?.targetPlatformUserId ||
+              step.input?.platformUserId ||
+              ''
+            );
+            if (target && !kicks.some((k) => k.targetUserId === target)) {
+              kicks.push({
+                id: `kick_run_${run.id}_${step.index}`,
+                type: 'kick',
+                targetUserId: target,
+                sentAt: step.createdAt || run.updatedAt || run.createdAt,
+              });
+            }
+          }
+        }
+      }
+    }
+    return kicks;
+  };
 
   // Load initial messages and agent runs when group changes or refresh triggered
   const loadGroupData = () => {
@@ -118,6 +207,14 @@ export const GroupChatWorkspace: React.FC<GroupChatWorkspaceProps> = ({
       .getGroupAgentRuns(currentGroup.id)
       .then((runs) => {
         setAgentRuns(runs);
+        const discoveredKicks = extractKicksFromRuns(runs);
+        if (discoveredKicks.length > 0) {
+          setSystemNotices((prev) => {
+            const existingTargets = new Set(prev.map((n) => n.targetUserId));
+            const newItems = discoveredKicks.filter((k) => !existingTargets.has(k.targetUserId));
+            return [...prev, ...newItems];
+          });
+        }
       })
       .catch((err) => {
         console.error('Failed to load group agent runs:', err);
@@ -137,7 +234,6 @@ export const GroupChatWorkspace: React.FC<GroupChatWorkspaceProps> = ({
       if (currentGroup && gId && gId !== currentGroup.id) return;
 
       setMessages((prev) => {
-        // Prevent duplicate by id, clientMsgId or msgId
         const exists = prev.some(
           (m) =>
             (m.id && msg.id && m.id === msg.id) ||
@@ -197,6 +293,20 @@ export const GroupChatWorkspace: React.FC<GroupChatWorkspaceProps> = ({
 
       const gId = data?.groupId;
       if (gId && currentGroup && gId !== currentGroup.id) return;
+
+      // Check if step executed kick_user successfully
+      if (step.name === 'kick_user' && (step.auditVerdict === 'pass' || !step.isError)) {
+        const target = String(
+          step.input?.platform_user_id ||
+          step.input?.targetPlatformUserId ||
+          step.input?.platformUserId ||
+          ''
+        );
+        if (target) {
+          setDynamicMembers((prev) => prev.filter((m) => m.platformUserId !== target));
+          addKickNotice(target);
+        }
+      }
 
       setAgentRuns((prev) => {
         const existingRun = prev.find((r) => r.id === runId);
@@ -268,20 +378,36 @@ export const GroupChatWorkspace: React.FC<GroupChatWorkspaceProps> = ({
       });
     });
 
+    const unsubGroupUpdated = wsClient.subscribe('group_updated', (data: any) => {
+      if (!currentGroup || data.groupId !== currentGroup.id) return;
+
+      if (data.action === 'member_joined' && data.platformUserId) {
+        setDynamicMembers((prev) => {
+          if (prev.some((m) => m.platformUserId === data.platformUserId)) return prev;
+          return [
+            ...prev,
+            {
+              accountId: data.platformUserId,
+              platformUserId: data.platformUserId,
+              role: 'member',
+            },
+          ];
+        });
+      } else if (data.action === 'member_left' && data.platformUserId) {
+        setDynamicMembers((prev) => prev.filter((m) => m.platformUserId !== data.platformUserId));
+        addKickNotice(data.platformUserId);
+      }
+    });
+
     return () => {
       unsubNewMessage();
       unsubUpdatedMessage();
       unsubAgentStarted();
       unsubAgentStep();
       unsubAgentFinished();
+      unsubGroupUpdated();
     };
   }, [currentGroup?.id]);
-
-  const scrollToBottom = () => {
-    setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, 100);
-  };
 
   // Load earlier messages using nextCursor
   const handleLoadEarlier = async () => {
@@ -336,6 +462,87 @@ export const GroupChatWorkspace: React.FC<GroupChatWorkspaceProps> = ({
     }
   };
 
+  // Sender Metadata Resolver
+  const getSenderDisplay = (senderPlatformUserId: string, text: string): SenderDisplay => {
+    const matchedAccount = accounts.find(
+      (a) =>
+        a.platformUserId === senderPlatformUserId ||
+        a.id === senderPlatformUserId ||
+        senderPlatformUserId === `u_${a.id}`
+    );
+
+    const memberInfo = currentGroup?.members.find(
+      (m) =>
+        m.platformUserId === senderPlatformUserId ||
+        (matchedAccount && m.accountId === matchedAccount.id)
+    );
+
+    const isSpammer =
+      senderPlatformUserId.toLowerCase().includes('spammer') ||
+      text.includes('兼职') ||
+      text.includes('刷单') ||
+      text.includes('彩金') ||
+      text.includes('微信');
+
+    if (matchedAccount) {
+      const role = memberInfo?.role || 'member';
+      if (role === 'creator') {
+        return {
+          name: matchedAccount.id,
+          badgeLabel: '群主',
+          badgeColor: 'bg-amber-500/20 text-amber-300 border border-amber-500/40',
+          dotColor: 'bg-amber-400',
+          platformUserId: senderPlatformUserId,
+          isOwnAccount: true,
+          isSpammer: false,
+        };
+      } else if (role === 'admin') {
+        return {
+          name: matchedAccount.id,
+          badgeLabel: '管理员',
+          badgeColor: 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40',
+          dotColor: 'bg-indigo-400',
+          platformUserId: senderPlatformUserId,
+          isOwnAccount: true,
+          isSpammer: false,
+        };
+      } else {
+        return {
+          name: matchedAccount.id,
+          badgeLabel: '成员',
+          badgeColor: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40',
+          dotColor: 'bg-emerald-400',
+          platformUserId: senderPlatformUserId,
+          isOwnAccount: true,
+          isSpammer: false,
+        };
+      }
+    }
+
+    // External member / visitor
+    if (isSpammer) {
+      return {
+        name: '外部违规成员',
+        badgeLabel: '违规广告嫌疑',
+        badgeColor: 'bg-rose-500/25 text-rose-300 border border-rose-500/50 animate-pulse',
+        dotColor: 'bg-rose-500',
+        platformUserId: senderPlatformUserId,
+        isOwnAccount: false,
+        isSpammer: true,
+      };
+    }
+
+    return {
+      name: '外部访客',
+      badgeLabel: '路人/客户',
+      badgeColor: 'bg-orange-500/20 text-orange-300 border border-orange-500/30',
+      dotColor: 'bg-orange-400',
+      platformUserId: senderPlatformUserId,
+      isOwnAccount: false,
+      isSpammer: false,
+    };
+  };
+
   const getDeliveryStatusBadge = (status: MessageItem['deliveryStatus'], failCode?: string | null) => {
     switch (status) {
       case 'queued':
@@ -373,6 +580,12 @@ export const GroupChatWorkspace: React.FC<GroupChatWorkspaceProps> = ({
         return null;
     }
   };
+
+  // Construct chronologically merged timeline items
+  const timelineItems: TimelineItem[] = [
+    ...messages.map((m) => ({ kind: 'message' as const, data: m, sentAt: m.sentAt })),
+    ...systemNotices.map((n) => ({ kind: 'kick_notice' as const, data: n, sentAt: n.sentAt })),
+  ].sort((a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime());
 
   return (
     <div className="rounded-2xl bg-slate-900 border border-slate-800/80 shadow-xl overflow-hidden flex flex-col h-[750px]">
@@ -492,32 +705,45 @@ export const GroupChatWorkspace: React.FC<GroupChatWorkspaceProps> = ({
             <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-slate-400">
               <span className="flex items-center gap-1.5">
                 <Users className="w-3.5 h-3.5 text-indigo-400" />
-                群内成员 ({currentGroup?.members.length || 0})
+                群内成员 ({dynamicMembers.length})
               </span>
             </div>
 
             <div className="space-y-1.5 overflow-y-auto max-h-[580px] pr-1">
-              {currentGroup?.members.map((m) => {
-                const acc = accounts.find((a) => a.id === m.accountId);
-                const isOnline = acc?.status === 'online';
+              {dynamicMembers.map((m) => {
+                const acc = accounts.find((a) => a.id === m.accountId || a.platformUserId === m.platformUserId);
+                const isOnline = acc ? acc.status === 'online' : true;
                 const isCreator = m.role === 'creator';
                 const isAdmin = m.role === 'admin';
+                const isSpammer = m.platformUserId.toLowerCase().includes('spammer');
 
                 return (
                   <div
-                    key={m.accountId}
-                    className="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800/60 flex items-center justify-between"
+                    key={m.platformUserId || m.accountId}
+                    className={`p-2.5 rounded-xl border flex items-center justify-between transition-all duration-300 animate-in fade-in slide-in-from-left-2 ${
+                      isSpammer
+                        ? 'bg-rose-950/30 border-rose-500/40 text-rose-300'
+                        : 'bg-slate-900/60 border-slate-800/60'
+                    }`}
                   >
                     <div className="space-y-0.5">
                       <div className="flex items-center gap-1.5">
                         <span
                           className={`w-2 h-2 rounded-full ${
-                            isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
+                            isSpammer
+                              ? 'bg-rose-400 animate-pulse'
+                              : isOnline
+                              ? 'bg-emerald-400 animate-pulse'
+                              : 'bg-slate-500'
                           }`}
                         />
-                        <span className="font-mono text-xs font-bold text-white">{m.accountId}</span>
+                        <span className="font-mono text-xs font-bold text-white">
+                          {acc?.id || m.platformUserId}
+                        </span>
                       </div>
-                      <p className="text-[10px] text-slate-400 font-mono pl-3.5">{m.platformUserId}</p>
+                      <p className="text-[10px] text-slate-400 font-mono pl-3.5">
+                        {m.platformUserId}
+                      </p>
                     </div>
 
                     {/* Role Badges */}
@@ -530,6 +756,11 @@ export const GroupChatWorkspace: React.FC<GroupChatWorkspaceProps> = ({
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 font-semibold flex items-center gap-0.5">
                         <ShieldCheck className="w-2.5 h-2.5" />
                         管理员
+                      </span>
+                    ) : isSpammer ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 font-semibold flex items-center gap-0.5">
+                        <AlertOctagon className="w-2.5 h-2.5" />
+                        待处置
                       </span>
                     ) : (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-normal">
@@ -555,7 +786,7 @@ export const GroupChatWorkspace: React.FC<GroupChatWorkspaceProps> = ({
               <MessageSquare className="w-3.5 h-3.5 text-indigo-400" />
               <span>实时消息流 (游标分页 + WebSocket 毫秒级推送)</span>
             </span>
-            <span className="font-mono text-[11px]">{messages.length} 条已载入</span>
+            <span className="font-mono text-[11px]">{timelineItems.length} 条已载入</span>
           </div>
 
           {/* Messages Scroll Area */}
@@ -578,37 +809,85 @@ export const GroupChatWorkspace: React.FC<GroupChatWorkspaceProps> = ({
               </div>
             )}
 
-            {messages.length === 0 ? (
+            {timelineItems.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-xs space-y-2">
                 <MessageSquare className="w-8 h-8 text-slate-600" />
                 <span>该群暂无消息，请在下方发送或使用模拟器注入测试消息</span>
               </div>
             ) : (
-              messages.map((msg) => {
-                const isOwn = msg.isOwn;
+              timelineItems.map((item) => {
+                if (item.kind === 'kick_notice') {
+                  const notice = item.data;
+                  return (
+                    <div
+                      key={notice.id}
+                      className="flex justify-center my-3 animate-in fade-in zoom-in-95 duration-300"
+                    >
+                      <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-900 border border-rose-500/40 text-rose-300 text-xs shadow-lg shadow-rose-950/50">
+                        <ShieldAlert className="w-4 h-4 text-rose-400 flex-shrink-0 animate-pulse" />
+                        <span className="font-semibold tracking-wide">
+                          🛡️ AI 智能风控介入：检测到垃圾广告违规，已将违规成员 [{notice.targetUserId}] 移出群聊！
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-mono ml-1">
+                          {new Date(notice.sentAt).toLocaleTimeString()}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Message bubble
+                const msg = item.data;
+                const sender = getSenderDisplay(msg.senderPlatformUserId, msg.text);
+                const isOwn = sender.isOwnAccount;
+
                 return (
                   <div
                     key={msg.id || msg.clientMsgId}
                     className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'}`}
                   >
-                    {/* Sender & Timestamp */}
-                    <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mb-1 px-1">
-                      <span className="font-mono font-medium text-slate-300">
-                        {isOwn ? '本方小号' : msg.senderPlatformUserId}
+                    {/* Sender Header */}
+                    <div className={`flex items-center gap-1.5 text-[11px] mb-1 px-1 ${isOwn ? 'justify-end' : 'justify-start'}`}>
+                      {isOwn && (
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          {new Date(msg.sentAt).toLocaleTimeString()}
+                        </span>
+                      )}
+
+                      {/* Role and Identity Tag */}
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-mono text-[11px] font-semibold ${sender.badgeColor}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${sender.dotColor}`} />
+                        <span>{sender.name}</span>
+                        <span className="font-normal opacity-80">[{sender.badgeLabel}]</span>
                       </span>
-                      <span className="text-[10px] text-slate-500">
-                        {new Date(msg.sentAt).toLocaleTimeString()}
+
+                      <span className="text-[10px] text-slate-500 font-mono">
+                        {msg.senderPlatformUserId}
                       </span>
+
+                      {!isOwn && (
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          {new Date(msg.sentAt).toLocaleTimeString()}
+                        </span>
+                      )}
                     </div>
 
                     {/* Bubble */}
                     <div
                       className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm shadow-sm transition-all ${
                         isOwn
-                          ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-tr-none'
+                          ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-tr-none shadow-md shadow-indigo-950/20'
+                          : sender.isSpammer
+                          ? 'bg-rose-950/40 text-rose-100 border border-rose-500/50 rounded-tl-none shadow-md shadow-rose-950/40'
                           : 'bg-slate-800/90 text-slate-100 border border-slate-700/60 rounded-tl-none'
                       }`}
                     >
+                      {sender.isSpammer && (
+                        <div className="flex items-center gap-1 text-[11px] font-semibold text-rose-400 mb-1 border-b border-rose-800/50 pb-1">
+                          <AlertOctagon className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
+                          <span>违规广告与引流拦截嫌疑</span>
+                        </div>
+                      )}
                       <p className="whitespace-pre-wrap leading-relaxed break-words">{msg.text}</p>
                     </div>
 

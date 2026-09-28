@@ -120,6 +120,14 @@ export class GatewaySSEService {
           const { groupId, platformUserId } = data as { groupId: string; platformUserId: string };
           if (groupId && platformUserId) {
             groupService.onMemberJoinedEvent(groupId, platformUserId);
+            const group = await prisma.group.findUnique({ where: { gatewayGroupId: groupId } });
+            if (group) {
+              websocketService.notifyGroupUpdated({
+                groupId: group.id,
+                action: 'member_joined',
+                platformUserId,
+              });
+            }
           }
           break;
         }
