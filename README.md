@@ -95,21 +95,19 @@ pnpm dev:gateway
 pnpm dev:agent
 ```
 
-### 3.4 执行第一阶段全量验收测试
-在两个 mock 服务运行期间，运行内置的一键验收脚本：
-```bash
-pnpm verify
-```
-验收脚本将自动验证：
-1. 网关健康检查、账号连接与状态保持；
-2. 群组创建、邀请链接生成、延迟入群事件通知；
-3. 管理员提升、消息发送受理 (202) 与异步落地查询；
-4. 409 离线拒绝、429 限流响应等错误码覆盖；
-5. SSE 断线重连历史事件补发；
-6. Agent 工具合法性校验与 400 拦截；
-7. Agent 问答多轮 tool_use -> tool_result -> finish 完整闭环；
-8. 违规内容自动识别并触发 kick_user 工具调用；
-9. 消息安全审计的 pass/fail 双向策略判定。
+### 3.4 执行各阶段全量验收测试
+- **阶段一验收（Mock 网关与 Agent 契约）**：
+  ```bash
+  pnpm verify
+  ```
+- **阶段二验收（核心后端 A0~A3、状态机 CAS、建群与消息时间线）**：
+  ```bash
+  pnpm verify:phase2
+  ```
+- **阶段三验收（A4 游标分页 & WebSocket 实时总线 + A5 Agent 循环引擎与看门狗）**：
+  ```bash
+  pnpm verify:phase3
+  ```
 
 ### 3.5 全局类型检查与构建
 ```bash
@@ -120,7 +118,12 @@ pnpm typecheck
 pnpm build
 ```
 
-### 3.6 启动 PostgreSQL（用于第二阶段）
+### 3.6 数据库管理 (PostgreSQL)
 ```bash
+# 启动 PostgreSQL 容器
 docker compose up postgres -d
+
+# 执行数据库迁移与种子数据填充
+pnpm --filter server run prisma:generate
+pnpm --filter server run prisma:seed
 ```
