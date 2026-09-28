@@ -104,28 +104,34 @@ export class WebSocketService {
     }
   }
 
-  public notifyMessageNew(message: unknown): void {
-    this.broadcast('message_new', message);
+  public notifyMessageNew(message: any): void {
+    this.broadcast('message_new', { groupId: message.groupId, message });
   }
 
-  public notifyMessageUpdated(message: unknown): void {
-    this.broadcast('message_updated', message);
+  public notifyMessageUpdated(message: any): void {
+    this.broadcast('message_updated', { groupId: message.groupId, message });
   }
 
   public notifyAccountUpdated(account: unknown): void {
     this.broadcast('account_updated', account);
   }
 
-  public notifyAgentRunStarted(run: unknown): void {
-    this.broadcast('agent_run_started', run);
+  public notifyAgentRunStarted(run: any): void {
+    this.broadcast('agent_run_started', { groupId: run.groupId, run });
   }
 
-  public notifyAgentRunStep(runId: string, step: unknown): void {
+  public notifyAgentRunStep(runId: string, step: any): void {
     this.broadcast('agent_run_step', { runId, step });
   }
 
-  public notifyAgentRunFinished(run: unknown): void {
-    this.broadcast('agent_run_finished', run);
+  public notifyAgentRunFinished(run: any): void {
+    this.broadcast('agent_run_finished', {
+      groupId: run.groupId,
+      runId: run.id,
+      status: run.status,
+      endReason: run.endReason,
+      summary: run.summary,
+    });
   }
 
   public notifyGroupUpdated(group: unknown): void {

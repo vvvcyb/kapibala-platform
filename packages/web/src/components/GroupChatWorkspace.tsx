@@ -33,18 +33,23 @@ interface GroupChatWorkspaceProps {
   groups: Group[];
   accounts: Account[];
   currentUser: AuthUser | null;
+  selectedGroupId: string;
+  onSelectGroup: (groupId: string) => void;
   onRefreshGroups: () => void;
+  refreshTrigger?: number;
 }
 
 export const GroupChatWorkspace: React.FC<GroupChatWorkspaceProps> = ({
   groups,
   accounts,
   currentUser,
+  selectedGroupId,
+  onSelectGroup,
   onRefreshGroups,
+  refreshTrigger = 0,
 }) => {
   const isViewer = currentUser?.role === 'viewer';
 
-  const [selectedGroupId, setSelectedGroupId] = useState<string>(groups[0]?.id || '');
   const [messages, setMessages] = useState<MessageItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
@@ -75,9 +80,9 @@ export const GroupChatWorkspace: React.FC<GroupChatWorkspaceProps> = ({
   // Update default selected group if none selected
   useEffect(() => {
     if (!selectedGroupId && groups.length > 0) {
-      setSelectedGroupId(groups[0].id);
+      onSelectGroup(groups[0].id);
     }
-  }, [groups, selectedGroupId]);
+  }, [groups, selectedGroupId, onSelectGroup]);
 
   // Update default sender account when current group changes
   useEffect(() => {
@@ -92,8 +97,8 @@ export const GroupChatWorkspace: React.FC<GroupChatWorkspaceProps> = ({
     }
   }, [currentGroup, accounts]);
 
-  // Load initial messages and agent runs when group changes
-  useEffect(() => {
+  // Load initial messages and agent runs when group changes or refresh triggered
+  const loadGroupData = () => {
     if (!currentGroup) return;
 
     // Load messages
@@ -117,68 +122,102 @@ export const GroupChatWorkspace: React.FC<GroupChatWorkspaceProps> = ({
       .catch((err) => {
         console.error('Failed to load group agent runs:', err);
       });
-  }, [currentGroup?.id]);
+  };
+
+  useEffect(() => {
+    loadGroupData();
+  }, [currentGroup?.id, refreshTrigger]);
 
   // WebSocket subscriptions for realtime events
   useEffect(() => {
-    const unsubNewMessage = wsClient.subscribe('message_new', (data: { groupId?: string; message: MessageItem }) => {
-      if (!currentGroup || data.groupId !== currentGroup.id) return;
+    const unsubNewMessage = wsClient.subscribe('message_new', (data: any) => {
+      const msg: MessageItem = data?.message || data;
+      if (!msg) return;
+      const gId = data?.groupId || (msg as any)?.groupId;
+      if (currentGroup && gId && gId !== currentGroup.id) return;
+
       setMessages((prev) => {
-        // Prevent duplicate by id or clientMsgId
+        // Prevent duplicate by id, clientMsgId or msgId
         const exists = prev.some(
           (m) =>
-            m.id === data.message.id ||
-            (m.clientMsgId && data.message.clientMsgId && m.clientMsgId === data.message.clientMsgId)
+            (m.id && msg.id && m.id === msg.id) ||
+            (m.clientMsgId && msg.clientMsgId && m.clientMsgId === msg.clientMsgId) ||
+            (m.msgId && msg.msgId && m.msgId === msg.msgId)
         );
         if (exists) {
           return prev.map((m) =>
-            m.id === data.message.id || (m.clientMsgId && m.clientMsgId === data.message.clientMsgId)
-              ? { ...m, ...data.message }
+            (m.id && msg.id && m.id === msg.id) ||
+            (m.clientMsgId && msg.clientMsgId && m.clientMsgId === msg.clientMsgId) ||
+            (m.msgId && msg.msgId && m.msgId === msg.msgId)
+              ? { ...m, ...msg }
               : m
           );
         }
-        return [...prev, data.message];
+        return [...prev, msg];
       });
       scrollToBottom();
     });
 
-    const unsubUpdatedMessage = wsClient.subscribe(
-      'message_updated',
-      (data: { groupId?: string; message: MessageItem }) => {
-        if (!currentGroup || data.groupId !== currentGroup.id) return;
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === data.message.id ||
-            (m.clientMsgId && data.message.clientMsgId && m.clientMsgId === data.message.clientMsgId)
-              ? { ...m, ...data.message }
-              : m
-          )
-        );
-      }
-    );
+    const unsubUpdatedMessage = wsClient.subscribe('message_updated', (data: any) => {
+      const msg: MessageItem = data?.message || data;
+      if (!msg) return;
+      const gId = data?.groupId || (msg as any)?.groupId;
+      if (currentGroup && gId && gId !== currentGroup.id) return;
 
-    const unsubAgentStep = wsClient.subscribe('agent_run_step', (data: { groupId: string; runId: string; step: any }) => {
-      if (!currentGroup || data.groupId !== currentGroup.id) return;
+      setMessages((prev) =>
+        prev.map((m) =>
+          (m.id && msg.id && m.id === msg.id) ||
+          (m.clientMsgId && msg.clientMsgId && m.clientMsgId === msg.clientMsgId) ||
+          (m.msgId && msg.msgId && m.msgId === msg.msgId)
+            ? { ...m, ...msg }
+            : m
+        )
+      );
+    });
+
+    const unsubAgentStarted = wsClient.subscribe('agent_run_started', (data: any) => {
+      const run: AgentRun = data?.run || data;
+      if (!run || !run.id) return;
+      const gId = data?.groupId || run?.groupId;
+      if (currentGroup && gId && gId !== currentGroup.id) return;
+
       setAgentRuns((prev) => {
-        const existingRun = prev.find((r) => r.id === data.runId);
+        const exists = prev.some((r) => r.id === run.id);
+        if (exists) {
+          return prev.map((r) => (r.id === run.id ? { ...r, ...run } : r));
+        }
+        return [run, ...prev];
+      });
+    });
+
+    const unsubAgentStep = wsClient.subscribe('agent_run_step', (data: any) => {
+      const runId = data?.runId;
+      const step = data?.step;
+      if (!runId || !step) return;
+
+      const gId = data?.groupId;
+      if (gId && currentGroup && gId !== currentGroup.id) return;
+
+      setAgentRuns((prev) => {
+        const existingRun = prev.find((r) => r.id === runId);
         if (existingRun) {
           const steps = existingRun.steps || [];
-          const stepExists = steps.some((s) => s.index === data.step.index);
+          const stepExists = steps.some((s) => s.index === step.index);
           const updatedSteps = stepExists
-            ? steps.map((s) => (s.index === data.step.index ? data.step : s))
-            : [...steps, data.step];
-          return prev.map((r) => (r.id === data.runId ? { ...r, steps: updatedSteps } : r));
+            ? steps.map((s) => (s.index === step.index ? step : s))
+            : [...steps, step];
+          return prev.map((r) => (r.id === runId ? { ...r, steps: updatedSteps } : r));
         } else {
           return [
             {
-              id: data.runId,
-              groupId: data.groupId,
+              id: runId,
+              groupId: currentGroup?.id || '',
               status: 'running',
               endReason: null,
               summary: null,
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
-              steps: [data.step],
+              steps: [step],
             },
             ...prev,
           ];
@@ -186,29 +225,53 @@ export const GroupChatWorkspace: React.FC<GroupChatWorkspaceProps> = ({
       });
     });
 
-    const unsubAgentFinished = wsClient.subscribe(
-      'agent_run_finished',
-      (data: { groupId: string; runId: string; status: AgentRun['status']; endReason?: string; summary?: string }) => {
-        if (!currentGroup || data.groupId !== currentGroup.id) return;
-        setAgentRuns((prev) =>
-          prev.map((r) =>
-            r.id === data.runId
+    const unsubAgentFinished = wsClient.subscribe('agent_run_finished', (data: any) => {
+      const runId = data?.runId || data?.id;
+      if (!runId) return;
+
+      const gId = data?.groupId;
+      if (gId && currentGroup && gId !== currentGroup.id) return;
+
+      const status = data?.status;
+      const endReason = data?.endReason;
+      const summary = data?.summary;
+
+      setAgentRuns((prev) => {
+        const exists = prev.some((r) => r.id === runId);
+        if (exists) {
+          return prev.map((r) =>
+            r.id === runId
               ? {
                   ...r,
-                  status: data.status,
-                  endReason: data.endReason || r.endReason,
-                  summary: data.summary || r.summary,
+                  status: status || r.status,
+                  endReason: endReason !== undefined ? endReason : r.endReason,
+                  summary: summary !== undefined ? summary : r.summary,
                   updatedAt: new Date().toISOString(),
                 }
               : r
-          )
-        );
-      }
-    );
+          );
+        } else {
+          return [
+            {
+              id: runId,
+              groupId: gId || currentGroup?.id || '',
+              status: status || 'finished',
+              endReason: endReason || null,
+              summary: summary || null,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              steps: [],
+            },
+            ...prev,
+          ];
+        }
+      });
+    });
 
     return () => {
       unsubNewMessage();
       unsubUpdatedMessage();
+      unsubAgentStarted();
       unsubAgentStep();
       unsubAgentFinished();
     };
@@ -327,7 +390,7 @@ export const GroupChatWorkspace: React.FC<GroupChatWorkspaceProps> = ({
                   <button
                     key={grp.id}
                     type="button"
-                    onClick={() => setSelectedGroupId(grp.id)}
+                    onClick={() => onSelectGroup(grp.id)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-all ${
                       isActive
                         ? 'bg-indigo-600 text-white shadow-sm'
@@ -717,7 +780,7 @@ export const GroupChatWorkspace: React.FC<GroupChatWorkspaceProps> = ({
           onClose={() => setShowCreateModal(false)}
           onGroupCreated={(newGroupId) => {
             onRefreshGroups();
-            setSelectedGroupId(newGroupId);
+            onSelectGroup(newGroupId);
           }}
         />
       )}

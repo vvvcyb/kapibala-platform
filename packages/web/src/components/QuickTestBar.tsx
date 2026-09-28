@@ -6,9 +6,15 @@ interface QuickTestBarProps {
   currentGroup: Group | null;
   isOpen: boolean;
   onClose: () => void;
+  onRefresh?: () => void;
 }
 
-export const QuickTestBar: React.FC<QuickTestBarProps> = ({ currentGroup, isOpen, onClose }) => {
+export const QuickTestBar: React.FC<QuickTestBarProps> = ({
+  currentGroup,
+  isOpen,
+  onClose,
+  onRefresh,
+}) => {
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -29,12 +35,18 @@ export const QuickTestBar: React.FC<QuickTestBarProps> = ({ currentGroup, isOpen
 
     setLoadingAction('greeting');
     try {
+      if (!currentGroup.agentEnabled) {
+        await api.updateGroupSettings(currentGroup.id, { agentEnabled: true, autoKickEnabled: true });
+        currentGroup.agentEnabled = true;
+      }
+
       await api.simulateInboundMessage(
         currentGroup.gatewayGroupId,
         'u_visitor_88',
         '大家好！请问这个群是 Kapibala 智能客服服务群吗？'
       );
       showToast('success', '已成功注入外部访客消息！请观察右侧 Agent 思考与自动应答');
+      onRefresh?.();
     } catch (err: unknown) {
       const e = err as { message?: string };
       showToast('error', `模拟失败: ${e.message}`);
@@ -51,6 +63,12 @@ export const QuickTestBar: React.FC<QuickTestBarProps> = ({ currentGroup, isOpen
 
     setLoadingAction('violation');
     try {
+      if (!currentGroup.agentEnabled || !currentGroup.autoKickEnabled) {
+        await api.updateGroupSettings(currentGroup.id, { agentEnabled: true, autoKickEnabled: true });
+        currentGroup.agentEnabled = true;
+        currentGroup.autoKickEnabled = true;
+      }
+
       const spammerId = `u_spammer_${Math.floor(Math.random() * 900 + 100)}`;
       // 1. Add member to gateway
       await api.simulateAddMember(currentGroup.gatewayGroupId, spammerId);
@@ -61,6 +79,7 @@ export const QuickTestBar: React.FC<QuickTestBarProps> = ({ currentGroup, isOpen
         '【高薪兼职】日结800-1500元，居家操作无门槛，添加微信领取彩金！'
       );
       showToast('success', `已注入违规者 ${spammerId} 及广告！请观察 Agent 触发审计与自动踢人`);
+      onRefresh?.();
     } catch (err: unknown) {
       const e = err as { message?: string };
       showToast('error', `模拟违规失败: ${e.message}`);

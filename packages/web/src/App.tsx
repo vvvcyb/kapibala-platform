@@ -12,7 +12,9 @@ export function App() {
   const [wsConnected, setWsConnected] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState<string>('');
   const [showQuickTest, setShowQuickTest] = useState(true);
+  const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
 
   // Load initial accounts and groups
   const loadData = useCallback(async () => {
@@ -21,10 +23,18 @@ export function App() {
       const [accs, grps] = await Promise.all([api.getAccounts(), api.getGroups()]);
       setAccounts(accs);
       setGroups(grps);
+      if (grps.length > 0) {
+        setSelectedGroupId((prev) => (prev && grps.some((g) => g.id === prev) ? prev : grps[0].id));
+      }
     } catch (err) {
       console.error('Failed to load accounts/groups:', err);
     }
   }, [currentUser]);
+
+  const handleTriggerRefresh = useCallback(() => {
+    loadData();
+    setRefreshTrigger((prev) => prev + 1);
+  }, [loadData]);
 
   // Handle WebSocket connection lifecycle
   useEffect(() => {
@@ -64,6 +74,8 @@ export function App() {
     setWsConnected(false);
   };
 
+  const currentGroup = groups.find((g) => g.id === selectedGroupId) || groups[0] || null;
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500/30">
       {/* Login Modal when not authenticated */}
@@ -93,15 +105,19 @@ export function App() {
               groups={groups}
               accounts={accounts}
               currentUser={currentUser}
-              onRefreshGroups={loadData}
+              selectedGroupId={selectedGroupId || (groups[0]?.id || '')}
+              onSelectGroup={setSelectedGroupId}
+              onRefreshGroups={handleTriggerRefresh}
+              refreshTrigger={refreshTrigger}
             />
           </main>
 
           {/* Quick Test Bar Simulator Widget */}
           <QuickTestBar
-            currentGroup={groups[0] || null}
+            currentGroup={currentGroup}
             isOpen={showQuickTest}
             onClose={() => setShowQuickTest(false)}
+            onRefresh={handleTriggerRefresh}
           />
         </>
       )}
