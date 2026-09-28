@@ -19,7 +19,7 @@ async function getAdminToken(): Promise<string> {
   const res = await fetch(`${SERVER_URL}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'admin', password: 'admin' }),
+    body: JSON.stringify({ username: 'admin', password: 'admin123' }),
   });
   const data = (await res.json()) as { accessToken: string };
   return data.accessToken;
