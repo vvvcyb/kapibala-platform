@@ -10,7 +10,7 @@
     "dev:server": "pnpm --filter server dev",
     "dev:web": "pnpm --filter web dev",
     "dev:tg": "node ./node_modules/tsx/dist/cli.mjs scripts/tg-bridge.ts",
-    "dev:all": "concurrently -k -n gw,agent,srv,web,tg -c blue,yellow,green,magenta,cyan \"pnpm dev:gateway\" \"pnpm dev:agent\" \"pnpm dev:server\" \"pnpm dev:web\" \"pnpm dev:tg\"",
+    "dev:all": "concurrently -k -n gw,agent,srv,web -c blue,yellow,green,magenta \"pnpm dev:gateway\" \"pnpm dev:agent\" \"pnpm dev:server\" \"pnpm dev:web\"",
     "build": "pnpm -r run build",
     "typecheck": "pnpm -r run typecheck",
     "verify": "tsx scripts/verify-mocks.ts",

@@ -2,8 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 // Bot Configuration
-const TELEGRAM_BOT_TOKEN =
-  process.env.TELEGRAM_BOT_TOKEN || '8477597666:AAF_VcokEyzDWUgsbHvEDDd-k_-KrqkDVOs';
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const TG_API_BASE = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 const LOCAL_SERVER_BASE = process.env.LOCAL_SERVER_BASE || 'http://localhost:3000';
 const LOCAL_GATEWAY_BASE = process.env.LOCAL_GATEWAY_BASE || 'http://localhost:4001';
@@ -329,6 +328,13 @@ async function main() {
   console.log('========================================================');
   console.log('🚀 启动 Kapibala - Telegram 双向机器人桥接插件');
   console.log('========================================================');
+
+  if (!TELEGRAM_BOT_TOKEN) {
+    console.log('ℹ️ 未检测到 TELEGRAM_BOT_TOKEN 环境变量，Telegram 桥接功能已挂起等待。');
+    console.log('💡 若需启用真实手机群双向联动，请配置环境变量后运行：');
+    console.log('   export TELEGRAM_BOT_TOKEN="<your_bot_token>" && pnpm dev:tg\n');
+    return;
+  }
 
   try {
     const bot = await verifyTelegramBot();
