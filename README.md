@@ -127,3 +127,21 @@ docker compose up postgres -d
 pnpm --filter server run prisma:generate
 pnpm --filter server run prisma:seed
 ```
+
+### 3.7 启动核心后端与前端控制台
+```bash
+# 启动核心后端 API 与 WebSocket 服务 (端口 3000)
+pnpm dev:server
+
+# 启动 React 18 前端管理控制台 (端口 5173)
+pnpm dev:web
+```
+浏览器打开 `http://localhost:5173` 即可进入管理控制台：
+- **管理员账号**：`admin` / `admin` 或 `admin123`（具备完整写操作、账号控制、建群、发信权限）
+- **只读观察员账号**：`viewer` / `viewer` 或 `viewer123`（只读权限，写操作按钮全部自动隐匿与 403 保护）
+- **功能体验**：
+  1. **账号看板**：实时监控 4 个服务账号的在线/限流/离线状态，可点击「连接」「标记离线」。
+  2. **一键异步建群向导**：点击「创建群组」，观察后台 Job 进度条（20% -> 40% -> 60% -> 80% -> 100%）。
+  3. **实时消息时间线**：支持游标分页加载更早历史，支持多小号选择发言与送达状态（`queued -> accepted -> sent`）。
+  4. **快捷模拟器 (Quick Test Bar)**：支持一键模拟外人发言测试 Agent 自动回复，或一键模拟违规广告测试安全审计拦截与 `kick_user` 自动踢人全过程！
+
