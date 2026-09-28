@@ -4,9 +4,10 @@ import { api, setToken } from '../lib/api';
 
 interface LoginModalProps {
   onLoginSuccess: () => void;
+  initialMessage?: string | null;
 }
 
-export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess }) => {
+export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess, initialMessage }) => {
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('admin');
   const [loading, setLoading] = useState(false);
@@ -86,6 +87,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess }) => {
 
         {/* Form */}
         <form onSubmit={onSubmit} className="space-y-4">
+          {initialMessage && !error && (
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2 animate-in fade-in">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 text-amber-400" />
+              <span>{initialMessage}</span>
+            </div>
+          )}
+
           {error && (
             <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />

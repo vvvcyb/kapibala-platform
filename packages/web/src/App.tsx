@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { AlertCircle } from 'lucide-react';
 import { AuthUser, Account, Group, getCurrentUser, setToken, api } from './lib/api';
 import { wsClient } from './lib/ws';
 import { Navbar } from './components/Navbar';
@@ -15,6 +16,26 @@ export function App() {
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
   const [showQuickTest, setShowQuickTest] = useState(true);
   const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
+  const [authExpiredMessage, setAuthExpiredMessage] = useState<string | null>(null);
+
+  // Listen to auth_expired event (401 token expired)
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      setToken(null);
+      setCurrentUser(null);
+      wsClient.disconnect();
+      setWsConnected(false);
+      setAuthExpiredMessage('登录会话已到期，请重新登录');
+      setTimeout(() => {
+        setAuthExpiredMessage(null);
+      }, 8000);
+    };
+
+    window.addEventListener('auth_expired', handleAuthExpired);
+    return () => {
+      window.removeEventListener('auth_expired', handleAuthExpired);
+    };
+  }, []);
 
   // Load initial accounts and groups
   const loadData = useCallback(async () => {
@@ -65,6 +86,7 @@ export function App() {
   const handleLoginSuccess = () => {
     const user = getCurrentUser();
     setCurrentUser(user);
+    setAuthExpiredMessage(null);
   };
 
   const handleLogout = () => {
@@ -78,8 +100,21 @@ export function App() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500/30">
+      {/* Toast alert on auth expired */}
+      {authExpiredMessage && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[60] px-4 py-2.5 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-200 text-xs font-semibold shadow-2xl backdrop-blur-md flex items-center gap-2 animate-in fade-in slide-in-from-top-4">
+          <AlertCircle className="w-4 h-4 text-amber-400" />
+          <span>{authExpiredMessage}</span>
+        </div>
+      )}
+
       {/* Login Modal when not authenticated */}
-      {!currentUser && <LoginModal onLoginSuccess={handleLoginSuccess} />}
+      {!currentUser && (
+        <LoginModal
+          onLoginSuccess={handleLoginSuccess}
+          initialMessage={authExpiredMessage}
+        />
+      )}
 
       {/* Main App Layout */}
       {currentUser && (

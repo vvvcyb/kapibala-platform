@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Radio, RefreshCw, Power, PowerOff, ShieldAlert, Clock, UserCheck, AlertTriangle } from 'lucide-react';
+import { Radio, RefreshCw, Power, PowerOff, ShieldAlert, Clock, UserCheck, AlertTriangle, Zap } from 'lucide-react';
 import { Account, AccountStatus, api, AuthUser } from '../lib/api';
 
 interface AccountsPanelProps {
@@ -10,9 +10,27 @@ interface AccountsPanelProps {
 
 export const AccountsPanel: React.FC<AccountsPanelProps> = ({ accounts, currentUser, onRefresh }) => {
   const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
+  const [isConnectingAll, setIsConnectingAll] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const isViewer = currentUser?.role === 'viewer';
+  const offlineAccounts = accounts.filter((a) => a.status === 'idle' || a.status === 'disconnected');
+
+  const handleConnectAll = async () => {
+    if (isViewer || offlineAccounts.length === 0) return;
+    setIsConnectingAll(true);
+    setActionError(null);
+    try {
+      await Promise.all(offlineAccounts.map((acc) => api.connectAccount(acc.id)));
+      onRefresh();
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      setActionError(`一键连接小号异常: ${e.message}`);
+      onRefresh();
+    } finally {
+      setIsConnectingAll(false);
+    }
+  };
 
   const handleConnect = async (account: Account) => {
     if (isViewer) return;
@@ -116,14 +134,34 @@ export const AccountsPanel: React.FC<AccountsPanelProps> = ({ accounts, currentU
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={onRefresh}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-300 border border-slate-700/60 text-xs transition-colors"
-        >
-          <RefreshCw className="w-3.5 h-3.5 text-slate-400" />
-          <span>刷新</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {!isViewer && (
+            <button
+              type="button"
+              id="btn-connect-all-accounts"
+              disabled={isConnectingAll || offlineAccounts.length === 0}
+              onClick={handleConnectAll}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-medium transition-all shadow-sm hover:scale-[1.02] active:scale-[0.98] disabled:opacity-40"
+              title="一键将当前所有离线小号批量连接上线"
+            >
+              {isConnectingAll ? (
+                <div className="w-3.5 h-3.5 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Zap className="w-3.5 h-3.5 text-emerald-400" />
+              )}
+              <span>一键连接全部离线账号 ({offlineAccounts.length})</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-300 border border-slate-700/60 text-xs transition-colors"
+          >
+            <RefreshCw className="w-3.5 h-3.5 text-slate-400" />
+            <span>刷新</span>
+          </button>
+        </div>
       </div>
 
       {actionError && (

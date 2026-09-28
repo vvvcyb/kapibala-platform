@@ -129,6 +129,13 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
 
   const data = await response.json().catch(() => null);
 
+  if (response.status === 401) {
+    setToken(null);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('auth_expired'));
+    }
+  }
+
   if (!response.ok) {
     const message = data?.error?.message || `Request failed with status ${response.status}`;
     throw new Error(message);
