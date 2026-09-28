@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { gatewayStore } from '../store.js';
+import { Group, GroupMember } from '../types.js';
 
 export const mockControlRouter = Router();
 
@@ -70,11 +71,50 @@ mockControlRouter.post('/groups/:groupId/inbound-message', (req: Request, res: R
   const { groupId } = req.params;
   const { senderPlatformUserId, text } = req.body;
 
-  // Auto-bootstrap group in gateway memory if not ready
-  if (!gatewayStore.getGroup(groupId)) {
-    gatewayStore.ensureGroupWithDefaultMembers(groupId);
+  // 1. 检查 account_1, account_2, account_3，如果状态为 idle，调用 gatewayStore.connectAccount 将其上线
+  const targetAccounts: Array<{ id: string; role: 'creator' | 'admin' | 'member' }> = [
+    { id: 'account_1', role: 'creator' },
+    { id: 'account_2', role: 'admin' },
+    { id: 'account_3', role: 'member' },
+  ];
+
+  for (const item of targetAccounts) {
+    const acc = gatewayStore.getAccount(item.id);
+    if (!acc || acc.status === 'idle') {
+      try {
+        gatewayStore.connectAccount(item.id);
+      } catch {}
+    }
   }
 
+  // 2. 如果 !gatewayStore.getGroup(groupId)，直接在 gatewayStore 的 groups 映射中为该 groupId 注册初始群对象
+  if (!gatewayStore.getGroup(groupId)) {
+    const members = new Map<string, GroupMember>();
+    for (const item of targetAccounts) {
+      const acc = gatewayStore.getAccount(item.id);
+      const platformUserId = acc?.platformUserId || `u_${item.id}`;
+      members.set(platformUserId, {
+        platformUserId,
+        accountId: item.id,
+        role: item.role,
+        joinedAt: new Date().toISOString(),
+      });
+    }
+
+    const group: Group = {
+      groupId,
+      creatorAccountId: 'account_1',
+      members,
+      inviteLinks: new Map(),
+      messages: [],
+      writeForbidden: false,
+      ownerLeft: false,
+    };
+
+    gatewayStore.groups.set(groupId, group);
+  }
+
+  // 3. 随后正常 emit 消息事件
   const msgId = `m_ext_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
   const sentAt = new Date().toISOString();
 

@@ -11,8 +11,8 @@ import {
 } from './types.js';
 
 export class GatewayStore {
-  private accounts = new Map<string, Account>();
-  private groups = new Map<string, Group>();
+  public accounts = new Map<string, Account>();
+  public groups = new Map<string, Group>();
   private eventsBuffer: GatewayEvent[] = [];
   private eventListeners = new Set<(event: GatewayEvent) => void>();
   private nextEventId = 1;
