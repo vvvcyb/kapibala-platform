@@ -16,7 +16,8 @@
     "verify": "tsx scripts/verify-mocks.ts",
     "verify:phase2": "tsx scripts/verify-phase2.ts",
     "verify:phase3": "tsx scripts/verify-phase3.ts",
-    "test": "pnpm -r run test"
+    "test": "pnpm -r run test",
+    "postinstall": "pnpm --filter server run prisma:generate"
   },
   "devDependencies": {
     "@types/node": "^22.13.1",
