@@ -13,6 +13,7 @@ build/
 .env.local
 .env.*.local
 *.pem
+.last_tg_chat_id
 
 # IDE & OS
 .DS_Store

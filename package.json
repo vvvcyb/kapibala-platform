@@ -9,6 +9,7 @@
     "dev:agent": "pnpm --filter mock-agent dev",
     "dev:server": "pnpm --filter server dev",
     "dev:web": "pnpm --filter web dev",
+    "dev:tg": "tsx scripts/tg-bridge.ts",
     "build": "pnpm -r run build",
     "typecheck": "pnpm -r run typecheck",
     "verify": "tsx scripts/verify-mocks.ts",
