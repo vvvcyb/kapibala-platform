@@ -49,6 +49,40 @@ mockControlRouter.post('/groups/:groupId/expire-invite', (req: Request, res: Res
   res.json({ success: true, groupId, inviteLink });
 });
 
+// POST /mock/groups/:groupId/add-member - Simulate external member entering group
+mockControlRouter.post('/groups/:groupId/add-member', (req: Request, res: Response) => {
+  const { groupId } = req.params;
+  const { platformUserId } = req.body;
+  const group = gatewayStore.getGroup(groupId);
+  if (group && platformUserId) {
+    group.members.set(platformUserId, {
+      platformUserId,
+      role: 'member',
+      joinedAt: new Date().toISOString(),
+    });
+    gatewayStore.emitEvent('member_joined', { groupId, platformUserId });
+  }
+  res.json({ success: true, platformUserId });
+});
+
+// POST /mock/groups/:groupId/inbound-message - Simulate external member sending message (isOwn = false)
+mockControlRouter.post('/groups/:groupId/inbound-message', (req: Request, res: Response) => {
+  const { groupId } = req.params;
+  const { senderPlatformUserId, text } = req.body;
+  const msgId = `m_ext_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const sentAt = new Date().toISOString();
+
+  gatewayStore.emitEvent('message', {
+    groupId,
+    msgId,
+    senderPlatformUserId: senderPlatformUserId || 'u_external_visitor',
+    text: text || 'Hello from external user',
+    sentAt,
+  });
+
+  res.json({ success: true, msgId, sentAt });
+});
+
 // POST /mock/config - Update simulation options
 mockControlRouter.post('/config', (req: Request, res: Response) => {
   const { duplicateEvents, defaultSendDelayMs, defaultJoinDelayMs } = req.body;

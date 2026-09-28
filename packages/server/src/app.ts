@@ -7,6 +7,7 @@ import { healthRouter } from './routes/health.js';
 import { accountsRouter } from './routes/accounts.js';
 import { groupsRouter } from './routes/groups.js';
 import { jobsRouter } from './routes/jobs.js';
+import { agentRunsRouter } from './routes/agent-runs.js';
 
 export function createApp() {
   const app = express();
@@ -21,6 +22,7 @@ export function createApp() {
   app.use('/api/accounts', accountsRouter);
   app.use('/api/groups', groupsRouter);
   app.use('/api/jobs', jobsRouter);
+  app.use('/api/agent-runs', agentRunsRouter);
 
   // 404 handler
   app.use((_req, res) => {

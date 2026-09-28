@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { prisma } from '../prisma.js';
 import { gatewayClient } from './gateway-client.js';
 import { accountService } from './account.service.js';
+import { websocketService } from './websocket.service.js';
 import { AppError } from '../types.js';
 
 export class MessageService {
@@ -56,6 +57,17 @@ export class MessageService {
       },
     });
 
+    websocketService.notifyMessageNew({
+      id: message.id,
+      groupId: message.groupId,
+      clientMsgId: message.clientMsgId,
+      senderPlatformUserId: message.senderPlatformUserId,
+      isOwn: message.isOwn,
+      text: message.text,
+      sentAt: message.sentAt.toISOString(),
+      deliveryStatus: message.deliveryStatus,
+    });
+
     // 4. Dispatch handling:
     // If rate_limited: stays queued, will be sent after rate limit expires
     if (account.status === 'online' && group.gatewayGroupId) {
@@ -78,10 +90,11 @@ export class MessageService {
     try {
       const res = await gatewayClient.sendMessage(gatewayGroupId, accountId, clientMsgId, text);
       if (res.accepted) {
-        await prisma.message.update({
+        const updated = await prisma.message.update({
           where: { id: messageId },
           data: { deliveryStatus: 'accepted' },
         });
+        websocketService.notifyMessageUpdated(updated);
       }
     } catch (err: unknown) {
       const errorObj = err as {
@@ -101,10 +114,11 @@ export class MessageService {
 
       if (code === 'NETWORK_TIMEOUT' || errorObj.statusCode === 504) {
         // Mark unknown
-        await prisma.message.update({
+        const updated = await prisma.message.update({
           where: { id: messageId },
           data: { deliveryStatus: 'unknown' },
         });
+        websocketService.notifyMessageUpdated(updated);
 
         // Launch probe task to check by-client-id within 5s
         this.probeTimeoutMessage(messageId, gatewayGroupId, accountId, clientMsgId, text, isRetry);
@@ -116,36 +130,40 @@ export class MessageService {
           where: { gatewayGroupId },
           data: { status: 'unreachable' },
         });
-        await prisma.message.update({
+        const updated = await prisma.message.update({
           where: { id: messageId },
           data: { deliveryStatus: 'failed', failCode: 'GROUP_WRITE_FORBIDDEN' },
         });
+        websocketService.notifyMessageUpdated(updated);
         return;
       }
 
       if (code === 'ACCOUNT_SUSPENDED') {
         await accountService.handleTerminalState(accountId, 'suspended');
-        await prisma.message.update({
+        const updated = await prisma.message.update({
           where: { id: messageId },
           data: { deliveryStatus: 'cancelled', failCode: 'ACCOUNT_TERMINAL' },
         });
+        websocketService.notifyMessageUpdated(updated);
         return;
       }
 
       if (code === 'SESSION_EXPIRED') {
         await accountService.handleTerminalState(accountId, 'session_expired');
-        await prisma.message.update({
+        const updated = await prisma.message.update({
           where: { id: messageId },
           data: { deliveryStatus: 'cancelled', failCode: 'ACCOUNT_TERMINAL' },
         });
+        websocketService.notifyMessageUpdated(updated);
         return;
       }
 
       // SENDER_NOT_IN_GROUP, ACCOUNT_OFFLINE, or other failures
-      await prisma.message.update({
+      const updated = await prisma.message.update({
         where: { id: messageId },
         data: { deliveryStatus: 'failed', failCode: code || 'GATEWAY_ERROR' },
       });
+      websocketService.notifyMessageUpdated(updated);
     }
   }
 
@@ -163,7 +181,7 @@ export class MessageService {
     try {
       const landed = await gatewayClient.getMessageByClientId(gatewayGroupId, clientMsgId);
       if (landed) {
-        await prisma.message.update({
+        const updated = await prisma.message.update({
           where: { id: messageId },
           data: {
             msgId: landed.msgId,
@@ -171,6 +189,7 @@ export class MessageService {
             deliveryStatus: 'sent',
           },
         });
+        websocketService.notifyMessageUpdated(updated);
         return;
       }
 
@@ -178,10 +197,11 @@ export class MessageService {
       if (!hasRetried) {
         await this.dispatchOutboundMessage(messageId, gatewayGroupId, accountId, clientMsgId, text, true);
       } else {
-        await prisma.message.update({
+        const updated = await prisma.message.update({
           where: { id: messageId },
           data: { deliveryStatus: 'failed', failCode: 'NETWORK_TIMEOUT' },
         });
+        websocketService.notifyMessageUpdated(updated);
       }
     } catch (err) {
       console.warn(`[MessageService] Probe failed for ${clientMsgId}:`, err);
@@ -214,28 +234,58 @@ export class MessageService {
     }
   }
 
-  public async getMessages(groupId: string, before?: string, limit = 50) {
+  /**
+   * Cursor-based stable descending pagination
+   * Ensures that even if new messages arrive during reading older history,
+   * no duplicates or missed items can occur.
+   */
+  public async getMessages(groupId: string, cursorOrBefore?: string, limit = 50) {
     const take = Math.min(Math.max(1, limit), 100);
 
     const where: Record<string, unknown> = { groupId };
-    if (before) {
-      where.sentAt = { lt: new Date(before) };
+
+    if (cursorOrBefore) {
+      // Look up cursor item by id or msgId or clientMsgId
+      const cursorItem = await prisma.message.findFirst({
+        where: {
+          groupId,
+          OR: [
+            { id: cursorOrBefore },
+            { msgId: cursorOrBefore },
+            { clientMsgId: cursorOrBefore },
+          ],
+        },
+      });
+
+      if (cursorItem) {
+        where.OR = [
+          { sentAt: { lt: cursorItem.sentAt } },
+          { sentAt: cursorItem.sentAt, id: { lt: cursorItem.id } },
+        ];
+      } else {
+        // Fallback if cursorOrBefore is an ISO Date string
+        const parsedDate = new Date(cursorOrBefore);
+        if (!isNaN(parsedDate.getTime())) {
+          where.sentAt = { lt: parsedDate };
+        }
+      }
     }
 
     const messages = await prisma.message.findMany({
       where,
-      orderBy: { sentAt: 'desc' },
+      orderBy: [{ sentAt: 'desc' }, { id: 'desc' }],
       take: take + 1,
     });
 
     let nextCursor: string | null = null;
     if (messages.length > take) {
       const lastItem = messages[take - 1];
-      nextCursor = lastItem.sentAt.toISOString();
+      nextCursor = lastItem.msgId || lastItem.id;
       messages.pop();
     }
 
     const items = messages.map((m) => ({
+      id: m.id,
       msgId: m.msgId,
       clientMsgId: m.clientMsgId,
       senderPlatformUserId: m.senderPlatformUserId,

@@ -1,6 +1,8 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import { prisma } from '../prisma.js';
 import { groupService } from '../services/group.service.js';
 import { messageService } from '../services/message.service.js';
+import { websocketService } from '../services/websocket.service.js';
 import { authenticate, requireWritePermission } from '../middleware/auth.js';
 import { AppError } from '../types.js';
 
@@ -43,22 +45,36 @@ groupsRouter.get('/:id', authenticate, async (req: Request, res: Response, next:
   }
 });
 
-// PATCH /api/groups/:id { agentEnabled?, autoKickEnabled? } -> 200
-groupsRouter.patch(
-  '/:id',
-  authenticate,
-  requireWritePermission,
-  async (req: Request, res: Response, next: NextFunction) => {
-    const { id } = req.params;
-    const { agentEnabled, autoKickEnabled } = req.body;
-    try {
-      await groupService.updateGroupConfig(id, { agentEnabled, autoKickEnabled });
-      res.status(200).json({ success: true });
-    } catch (err) {
-      next(err);
-    }
+// PATCH /api/groups/:id & PATCH /api/groups/:id/settings
+const updateSettingsHandler = async (req: Request, res: Response, next: NextFunction) => {
+  const { id } = req.params;
+  const { agentEnabled, autoKickEnabled } = req.body;
+  try {
+    const updated = await groupService.updateGroupConfig(id, { agentEnabled, autoKickEnabled });
+    websocketService.notifyGroupUpdated(updated);
+    res.status(200).json({ success: true, group: updated });
+  } catch (err) {
+    next(err);
   }
-);
+};
+
+groupsRouter.patch('/:id/settings', authenticate, requireWritePermission, updateSettingsHandler);
+groupsRouter.patch('/:id', authenticate, requireWritePermission, updateSettingsHandler);
+
+// GET /api/groups/:id/agent-runs -> list recent agent runs for this group
+groupsRouter.get('/:id/agent-runs', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  const { id } = req.params;
+  try {
+    const runs = await prisma.agentRun.findMany({
+      where: { groupId: id },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    res.status(200).json(runs);
+  } catch (err) {
+    next(err);
+  }
+});
 
 // POST /api/groups/:id/send { accountId, text } -> 202 { clientMsgId }
 groupsRouter.post(
@@ -83,14 +99,14 @@ groupsRouter.post(
   }
 );
 
-// GET /api/groups/:id/messages?before=<cursor>&limit=50 -> { items: [...], nextCursor }
+// GET /api/groups/:id/messages?cursor=<msgId>&limit=20
 groupsRouter.get('/:id/messages', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   const { id: groupId } = req.params;
-  const before = req.query.before as string | undefined;
-  const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
+  const cursorParam = (req.query.cursor || req.query.before) as string | undefined;
+  const limitParam = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
 
   try {
-    const result = await messageService.getMessages(groupId, before, limit);
+    const result = await messageService.getMessages(groupId, cursorParam, limitParam);
     res.status(200).json(result);
   } catch (err) {
     next(err);

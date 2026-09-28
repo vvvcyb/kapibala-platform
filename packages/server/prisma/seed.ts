@@ -4,27 +4,27 @@ const prisma = new PrismaClient();
 
 async function main() {
   console.log('[Seed] Seeding default users...');
-  // 1. Preset users: admin and viewer
+  // SPEC 2.3: 预置两个用户：admin/admin（全部权限）、viewer/viewer（只读）
   await prisma.user.upsert({
     where: { username: 'admin' },
-    update: { password: 'admin123', role: 'admin' },
+    update: { password: 'admin', role: 'admin' },
     create: {
       username: 'admin',
-      password: 'admin123',
+      password: 'admin',
       role: 'admin',
     },
   });
 
   await prisma.user.upsert({
     where: { username: 'viewer' },
-    update: { password: 'viewer123', role: 'viewer' },
+    update: { password: 'viewer', role: 'viewer' },
     create: {
       username: 'viewer',
-      password: 'viewer123',
+      password: 'viewer',
       role: 'viewer',
     },
   });
-  console.log('[Seed] Users admin (admin123) and viewer (viewer123) created.');
+  console.log('[Seed] Users admin/admin and viewer/viewer created.');
 
   // 2. Preset accounts: account_1 ~ account_4
   console.log('[Seed] Seeding initial service accounts...');

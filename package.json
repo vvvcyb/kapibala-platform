@@ -13,11 +13,14 @@
     "typecheck": "pnpm -r run typecheck",
     "verify": "tsx scripts/verify-mocks.ts",
     "verify:phase2": "tsx scripts/verify-phase2.ts",
+    "verify:phase3": "tsx scripts/verify-phase3.ts",
     "test": "pnpm -r run test"
   },
   "devDependencies": {
     "@types/node": "^22.13.1",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.19.3",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "ws": "^8.22.0"
   }
 }

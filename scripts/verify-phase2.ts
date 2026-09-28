@@ -27,7 +27,7 @@ async function testA0AuthAndHealth() {
   const adminLoginRes = await fetch(`${SERVER_URL}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'admin', password: 'admin123' }),
+    body: JSON.stringify({ username: 'admin', password: 'admin' }),
   });
   assert(adminLoginRes.status === 200, `Admin login status: ${adminLoginRes.status}`);
   const adminAuth = await adminLoginRes.json() as { accessToken: string };
@@ -38,7 +38,7 @@ async function testA0AuthAndHealth() {
   const viewerLoginRes = await fetch(`${SERVER_URL}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'viewer', password: 'viewer123' }),
+    body: JSON.stringify({ username: 'viewer', password: 'viewer' }),
   });
   assert(viewerLoginRes.status === 200, `Viewer login status: ${viewerLoginRes.status}`);
   const viewerAuth = await viewerLoginRes.json() as { accessToken: string };

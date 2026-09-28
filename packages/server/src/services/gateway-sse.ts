@@ -2,6 +2,8 @@ import { config } from '../config.js';
 import { prisma } from '../prisma.js';
 import { groupService } from './group.service.js';
 import { accountService } from './account.service.js';
+import { agentRunner } from './agent-runner.js';
+import { websocketService } from './websocket.service.js';
 
 interface SSEFrame {
   id?: number;
@@ -130,6 +132,7 @@ export class GatewaySSEService {
               await prisma.groupMember.deleteMany({
                 where: { groupId: group.id, platformUserId },
               });
+              websocketService.notifyGroupUpdated({ groupId: group.id, action: 'member_left', platformUserId });
             }
           }
           break;
@@ -139,6 +142,7 @@ export class GatewaySSEService {
           const { accountId, status } = data as { accountId: string; status: 'suspended' | 'session_expired' };
           if (accountId && status) {
             await accountService.handleTerminalState(accountId, status);
+            websocketService.notifyAccountUpdated({ accountId, status });
           }
           break;
         }
@@ -154,6 +158,10 @@ export class GatewaySSEService {
                 deliveryStatus: 'sent',
               },
             });
+            const updated = await prisma.message.findFirst({ where: { clientMsgId } });
+            if (updated) {
+              websocketService.notifyMessageUpdated(updated);
+            }
           }
           break;
         }
@@ -182,7 +190,7 @@ export class GatewaySSEService {
           });
 
           if (!existing) {
-            await prisma.message.create({
+            const savedMsg = await prisma.message.create({
               data: {
                 groupId: group.id,
                 msgId,
@@ -192,6 +200,13 @@ export class GatewaySSEService {
                 sentAt: new Date(sentAt),
                 deliveryStatus: isOwn ? 'sent' : null,
               },
+            });
+
+            websocketService.notifyMessageNew(savedMsg);
+
+            // Trigger Agent Runner
+            agentRunner.onInboundMessage(savedMsg).catch((err) => {
+              console.error('[GatewaySSE] Error triggering agentRunner:', err);
             });
           }
           break;
@@ -203,6 +218,11 @@ export class GatewaySSEService {
     } catch (err) {
       // SPEC A2: 处理网关事件时如果自己的数据库写入失败，不能让事件处理中断，也不能让这个事件的内容丢失；同时推 inconsistency 事件
       console.error(`[GatewaySSE] Error handling event ${event}:`, err);
+      websocketService.broadcast('inconsistency', {
+        event,
+        error: (err as Error).message,
+        timestamp: new Date().toISOString(),
+      });
     }
   }
 }
