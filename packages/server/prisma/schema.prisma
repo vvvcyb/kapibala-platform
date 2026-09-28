@@ -60,6 +60,13 @@ enum SequenceStepStatus {
   failed
 }
 
+enum JobStatus {
+  pending
+  running
+  completed
+  failed
+}
+
 model User {
   id        String   @id @default(uuid())
   username  String   @unique
@@ -73,6 +80,7 @@ model Account {
   status           AccountStatus @default(idle)
   platformUserId   String?
   rateLimitedUntil DateTime?
+  version          Int           @default(0)
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
@@ -128,6 +136,20 @@ model Message {
   @@index([groupId, sentAt(sort: Desc)])
   @@unique([groupId, msgId])
   @@index([groupId, clientMsgId])
+}
+
+model Job {
+  id        String    @id @default(uuid())
+  type      String    // 如 'create_group'
+  status    JobStatus @default(pending)
+  progress  Int       @default(0) // 0 - 100
+  step      String?   // 当前执行步骤描述
+  error     String?   // 失败步骤与错误信息
+  errors    Json?     // 结构化错误列表 [{ step, code }]
+  payload   Json?     // 任务入参
+  result    Json?     // 任务产出（如 groupId 等）
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 }
 
 model Sequence {
@@ -188,21 +210,21 @@ model AgentRun {
 }
 
 model AgentRunStep {
-  id           String    @id @default(uuid())
-  runId        String
-  index        Int
-  kind         String    // 'tool_use' | 'final' | 'protocol_error'
-  toolUseId    String?
-  name         String?
-  input        Json?
+  id            String    @id @default(uuid())
+  runId         String
+  index         Int
+  kind          String    // 'tool_use' | 'final' | 'protocol_error'
+  toolUseId     String?
+  name          String?
+  input         Json?
   resultSummary String?
-  isError      Boolean   @default(false)
-  errorCode    String?
-  auditVerdict String?
-  rawResponse  String?
-  createdAt    DateTime  @default(now())
+  isError       Boolean   @default(false)
+  errorCode     String?
+  auditVerdict  String?
+  rawResponse   String?
+  createdAt     DateTime  @default(now())
 
-  run          AgentRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  run           AgentRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
 
   @@unique([runId, index])
 }

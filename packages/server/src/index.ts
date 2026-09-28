@@ -1,26 +1,27 @@
-import express from 'express';
-import cors from 'cors';
+import { createApp } from './app.js';
+import { config } from './config.js';
+import { gatewaySSEService } from './services/gateway-sse.js';
 
-const app = express();
-const PORT = Number(process.env.PORT || 3000);
-
-app.use(cors());
-app.use(express.json());
-
-// SPEC 2.3: GET /api/health -> { ok, schemaVersion }
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, schemaVersion: '1.0.0' });
-});
-
-// Skeleton placeholder for Phase 2 server endpoints
-app.get('/api', (_req, res) => {
-  res.json({ message: 'Kapibala Core Server API Skeleton' });
-});
+const app = createApp();
 
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
-    console.log(`[server] Core backend running on http://localhost:${PORT}`);
+  const server = app.listen(config.port, () => {
+    console.log(`[server] Core backend running on http://localhost:${config.port}`);
+    // Start SSE listener to message gateway
+    gatewaySSEService.start();
   });
+
+  const shutdown = () => {
+    console.log('[server] Shutting down gracefully...');
+    gatewaySSEService.stop();
+    server.close(() => {
+      console.log('[server] Server closed.');
+      process.exit(0);
+    });
+  };
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
 export default app;

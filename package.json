@@ -12,6 +12,7 @@
     "build": "pnpm -r run build",
     "typecheck": "pnpm -r run typecheck",
     "verify": "tsx scripts/verify-mocks.ts",
+    "verify:phase2": "tsx scripts/verify-phase2.ts",
     "test": "pnpm -r run test"
   },
   "devDependencies": {
