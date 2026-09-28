@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: kapibala-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: kapibala
+      POSTGRES_PASSWORD: kapibala
+      POSTGRES_DB: kapibala
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kapibala -d kapibala"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Reserved container configuration for mock-gateway
+  mock-gateway:
+    profiles: ["services"]
+    build:
+      context: .
+      dockerfile: packages/mock-gateway/Dockerfile
+    container_name: kapibala-mock-gateway
+    restart: unless-stopped
+    ports:
+      - "4001:4001"
+    environment:
+      - PORT=4001
+
+  # Reserved container configuration for mock-agent
+  mock-agent:
+    profiles: ["services"]
+    build:
+      context: .
+      dockerfile: packages/mock-agent/Dockerfile
+    container_name: kapibala-mock-agent
+    restart: unless-stopped
+    ports:
+      - "4002:4002"
+    environment:
+      - PORT=4002
+
+  # Reserved container configuration for server
+  server:
+    profiles: ["services"]
+    build:
+      context: .
+      dockerfile: packages/server/Dockerfile
+    container_name: kapibala-server
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - DATABASE_URL=postgresql://kapibala:kapibala@postgres:5432/kapibala?schema=public
+      - GATEWAY_URL=http://mock-gateway:4001
+      - AGENT_URL=http://mock-agent:4002
+      - JWT_SECRET=super-secret-jwt-key-for-kapibala-auth-32bytes
+      - REFRESH_TOKEN_SECRET=super-secret-refresh-key-for-kapibala-auth-32bytes
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Reserved container configuration for web console
+  web:
+    profiles: ["services"]
+    build:
+      context: .
+      dockerfile: packages/web/Dockerfile
+    container_name: kapibala-web
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    depends_on:
+      - server
+
+volumes:
+  postgres_data:

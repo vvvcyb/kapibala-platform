@@ -1,0 +1,208 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AccountStatus {
+  idle
+  online
+  rate_limited
+  disconnected
+  suspended
+  session_expired
+}
+
+enum GroupStatus {
+  active
+  unreachable
+  left
+}
+
+enum GroupRole {
+  creator
+  admin
+  member
+}
+
+enum DeliveryStatus {
+  queued
+  accepted
+  sent
+  failed
+  unknown
+  cancelled
+}
+
+enum AgentRunStatus {
+  running
+  finished
+  failed
+  blocked
+  cancelled
+}
+
+enum SequenceRunStatus {
+  running
+  finished
+  failed
+  stopped
+}
+
+enum SequenceStepStatus {
+  pending
+  accepted
+  sent
+  skipped
+  failed
+}
+
+model User {
+  id        String   @id @default(uuid())
+  username  String   @unique
+  password  String
+  role      String   // 'admin' | 'viewer'
+  createdAt DateTime @default(now())
+}
+
+model Account {
+  id               String        @id
+  status           AccountStatus @default(idle)
+  platformUserId   String?
+  rateLimitedUntil DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  memberships      GroupMember[]
+}
+
+model Group {
+  id               String       @id @default(uuid())
+  gatewayGroupId   String?      @unique
+  status           GroupStatus  @default(active)
+  creatorAccountId String
+  agentEnabled     Boolean      @default(false)
+  autoKickEnabled  Boolean      @default(false)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  members          GroupMember[]
+  messages         Message[]
+  agentRuns        AgentRun[]
+  sequenceRuns     SequenceRun[]
+}
+
+model GroupMember {
+  id             String    @id @default(uuid())
+  groupId        String
+  accountId      String
+  platformUserId String
+  role           GroupRole @default(member)
+  joinedAt       DateTime  @default(now())
+
+  group          Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  account        Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, accountId])
+}
+
+model Message {
+  id                   String         @id @default(uuid())
+  groupId              String
+  msgId                String?
+  clientMsgId          String?
+  senderPlatformUserId String
+  isOwn                Boolean        @default(false)
+  text                 String
+  sentAt               DateTime       @default(now())
+  deliveryStatus       DeliveryStatus?
+  failCode             String?
+  localFilePath        String?
+  createdAt            DateTime       @default(now())
+
+  group                Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([groupId, sentAt(sort: Desc)])
+  @@unique([groupId, msgId])
+  @@index([groupId, clientMsgId])
+}
+
+model Sequence {
+  id        String        @id @default(uuid())
+  name      String
+  steps     Json          // Array of step definitions
+  createdAt DateTime      @default(now())
+  runs      SequenceRun[]
+}
+
+model SequenceRun {
+  id               String            @id @default(uuid())
+  groupId          String
+  sequenceId       String
+  status           SequenceRunStatus @default(running)
+  currentStepIndex Int               @default(1)
+  vars             Json?
+  stepVars         Json?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  group            Group             @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  sequence         Sequence          @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  steps            SequenceRunStep[]
+
+  @@index([groupId, status])
+}
+
+model SequenceRunStep {
+  id           String             @id @default(uuid())
+  runId        String
+  index        Int
+  status       SequenceStepStatus @default(pending)
+  scheduledAt  DateTime?
+  sentAt       DateTime?
+  clientMsgId  String?
+  resolvedVars Json?
+  varSources   Json?
+
+  run          SequenceRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, index])
+}
+
+model AgentRun {
+  id        String         @id @default(uuid())
+  groupId   String
+  status    AgentRunStatus @default(running)
+  endReason String?
+  summary   String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  group     Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  steps     AgentRunStep[]
+
+  @@index([groupId, status])
+}
+
+model AgentRunStep {
+  id           String    @id @default(uuid())
+  runId        String
+  index        Int
+  kind         String    // 'tool_use' | 'final' | 'protocol_error'
+  toolUseId    String?
+  name         String?
+  input        Json?
+  resultSummary String?
+  isError      Boolean   @default(false)
+  errorCode    String?
+  auditVerdict String?
+  rawResponse  String?
+  createdAt    DateTime  @default(now())
+
+  run          AgentRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, index])
+}
