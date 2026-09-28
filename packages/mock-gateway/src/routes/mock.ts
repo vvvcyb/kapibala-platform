@@ -69,6 +69,12 @@ mockControlRouter.post('/groups/:groupId/add-member', (req: Request, res: Respon
 mockControlRouter.post('/groups/:groupId/inbound-message', (req: Request, res: Response) => {
   const { groupId } = req.params;
   const { senderPlatformUserId, text } = req.body;
+
+  // Auto-bootstrap group in gateway memory if not ready
+  if (!gatewayStore.getGroup(groupId)) {
+    gatewayStore.ensureGroupWithDefaultMembers(groupId);
+  }
+
   const msgId = `m_ext_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
   const sentAt = new Date().toISOString();
 

@@ -201,6 +201,51 @@ export class GatewayStore {
     return this.groups.get(groupId);
   }
 
+  public ensureGroupWithDefaultMembers(groupId: string): Group {
+    let group = this.groups.get(groupId);
+    if (!group) {
+      const defaultAccounts: Array<{ id: string; role: 'creator' | 'admin' | 'member' }> = [
+        { id: 'account_1', role: 'creator' },
+        { id: 'account_2', role: 'admin' },
+        { id: 'account_3', role: 'member' },
+      ];
+
+      for (const item of defaultAccounts) {
+        const acc = this.accounts.get(item.id);
+        if (!acc || acc.status === 'idle' || acc.status === 'disconnected') {
+          try {
+            this.connectAccount(item.id);
+          } catch {}
+        }
+      }
+
+      const members = new Map<string, GroupMember>();
+      for (const item of defaultAccounts) {
+        const acc = this.accounts.get(item.id);
+        const platformUserId = acc?.platformUserId || `u_${item.id}`;
+        members.set(platformUserId, {
+          platformUserId,
+          accountId: item.id,
+          role: item.role,
+          joinedAt: new Date().toISOString(),
+        });
+      }
+
+      group = {
+        groupId,
+        creatorAccountId: 'account_1',
+        members,
+        inviteLinks: new Map(),
+        messages: [],
+        writeForbidden: false,
+        ownerLeft: false,
+      };
+
+      this.groups.set(groupId, group);
+    }
+    return group;
+  }
+
   public createGroup(creatorAccountId: string): { groupId: string } {
     const account = this.accounts.get(creatorAccountId);
     if (!account || account.status === 'idle' || account.status === 'disconnected') {
