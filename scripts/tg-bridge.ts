@@ -281,15 +281,18 @@ async function startGatewaySSEListener(): Promise<void> {
 
 // 7. Handle Local Events from Gateway
 async function handleLocalEvent(eventType: string, payload: any): Promise<void> {
+  const data = payload?.payload || payload;
+  const actualType = payload?.type || eventType;
+
   // A. Message Event (Sent by our account or agent)
-  if (eventType === 'message' || payload.type === 'message') {
-    const sender = String(payload.senderPlatformUserId || '');
-    const isOwn = sender.startsWith('u_account_') || sender.includes('account_') || payload.isOwn === true;
+  if (actualType === 'message') {
+    const sender = String(data.senderPlatformUserId || '');
+    const isOwn = sender.startsWith('u_account_') || sender.includes('account_') || data.isOwn === true;
 
     // Only forward messages from our service accounts / Agent (exclude echo of external messages)
     if (isOwn) {
       const accountId = sender.replace(/^u_/, '');
-      const text = payload.text || '';
+      const text = data.text || '';
 
       console.log(`\n📤 [本地平台 -> TG 回复] 小号 ${accountId} 发出回复: "${text}"`);
 
@@ -306,9 +309,9 @@ async function handleLocalEvent(eventType: string, payload: any): Promise<void> 
   }
 
   // B. Member Left Event (Spammer auto-kicked by AI Agent)
-  else if (eventType === 'member_left' || payload.type === 'member_left') {
-    const platformUserId = String(payload.platformUserId || '');
-    const isSpammer = platformUserId.toLowerCase().includes('spammer') || payload.reason?.includes('violation');
+  else if (actualType === 'member_left') {
+    const platformUserId = String(data.platformUserId || '');
+    const isSpammer = platformUserId.toLowerCase().includes('spammer') || data.reason?.includes('violation');
 
     if (isSpammer) {
       console.log(`\n🚨 [本地平台 -> TG 风控] 检测到 Agent 执行踢人: ${platformUserId}`);
