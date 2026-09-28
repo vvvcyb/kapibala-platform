@@ -247,6 +247,8 @@ export class GroupService {
 
     return {
       status,
+      progress: job.progress,
+      step: job.step,
       errors,
       result: job.result,
     };
